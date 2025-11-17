@@ -52,24 +52,24 @@ public class HuffmanTree {
                     "Violation of precondition: buildTree(). Invalid frequency array.");
         }
 
-        PriorityQueue314 queue = new PriorityQueue314();
+        PriorityQueue314 nodeQueue = new PriorityQueue314();
         for (int value = 0; value < freq.length; value++) {
             if (freq[value] > 0) {
                 // value appears in the file, so create a leaf node
                 TreeNode node = new TreeNode(value, freq[value]);
-                queue.enqueue(node);
+                nodeQueue.enqueue(node);
             }
         }
-        while (queue.size() > 1) {
+        while (nodeQueue.size() > 1) {
             // elements at the front of queue are smallest, so make them the children of parent
-            TreeNode left = queue.dequeue();
-            TreeNode right = queue.dequeue();
+            TreeNode left = nodeQueue.dequeue();
+            TreeNode right = nodeQueue.dequeue();
             TreeNode parent = new TreeNode(left, -1, right);
             // add parent/children pair back into queue to continue building tree
-            queue.enqueue(parent);
+            nodeQueue.enqueue(parent);
         }
         // the last remaining element will be the completed Huffman tree
-        root = queue.dequeue();
+        root = nodeQueue.dequeue();
     }
 
     /**
