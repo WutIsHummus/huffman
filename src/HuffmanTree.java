@@ -35,7 +35,32 @@ public class HuffmanTree {
      * @param freq the frequency array for values 0–255 and PSEUDO_EOF
      */
     public HuffmanTree(int[] freq) {
+        if (freq == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: HuffmanTree(int[]). Input array cannot be null.");
+        }
+        if (freq.length != IHuffConstants.ALPH_SIZE + 1) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: HuffmanTree(int[]). Input array is not proper " +
+                            "length.");
+        }
+
         buildTree(freq);
+    }
+
+    /**
+     * Construct a HuffmanTree directly from a given root.
+     * pre: root != null
+     * post: this.root == root
+     * @param root the reconstructed Huffman tree root
+     */
+    public HuffmanTree(TreeNode root) {
+        if (root == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: HuffmanTree(TreeNode). Root cannot be null.");
+        }
+
+        this.root = root;
     }
 
     /**
