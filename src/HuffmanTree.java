@@ -24,7 +24,6 @@
  * post: tree is constructed after calling constructor
  */
 public class HuffmanTree {
-
     // the root of the Huffman tree
     private TreeNode root;
 

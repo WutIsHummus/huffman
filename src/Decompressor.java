@@ -26,13 +26,11 @@ import java.io.IOException;
  * post: provides methods for decoding Huffman-compressed data
  */
 public class Decompressor {
-
+    // invariant: tree is null before header is read and non-null only after successful header read
     // the Huffman tree reconstructed from header data
     private HuffmanTree tree;
-    private int myHeaderFormat;
-
     // viewer for error reporting
-    private IHuffViewer viewer;
+    private final IHuffViewer viewer;
 
     /**
      * Construct a decompressor that can report errors through the given viewer.
@@ -41,6 +39,11 @@ public class Decompressor {
      * @param viewer the IHuffViewer used to display messages and errors
      */
     public Decompressor(IHuffViewer viewer) {
+        if (viewer == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: Decompressor(). Viewer cannot be null.");
+        }
+
         this.viewer = viewer;
     }
 
@@ -54,6 +57,11 @@ public class Decompressor {
      * @throws IOException if error occurs while reading header
      */
     public boolean readHeader(BitInputStream bis) throws IOException {
+        if (bis == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: readHeader(). BitInputStream cannot be null.");
+        }
+
         // check if file is a huff compressed file
         int input = bis.readBits(IHuffConstants.BITS_PER_INT);
         if (input != IHuffConstants.MAGIC_NUMBER) {
@@ -62,7 +70,6 @@ public class Decompressor {
             return false;
         }
         int format = bis.readBits(IHuffConstants.BITS_PER_INT);
-        myHeaderFormat = format;
         // check whether to use SCF or STF
         if (format == IHuffConstants.STORE_COUNTS) {
             return readSCF(bis);
@@ -85,6 +92,11 @@ public class Decompressor {
      * @throws IOException if an error occurs while reading
      */
     private boolean readSCF(BitInputStream bis) throws IOException {
+        if (bis == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: decode(). Input BitInputStream cannot be null.");
+        }
+
         // SCF format, create a frequency array to use in creating a tree
         int[] freqs = new int[IHuffConstants.ALPH_SIZE + 1];
         for (int i = 0; i < IHuffConstants.ALPH_SIZE; i++) {
@@ -112,10 +124,15 @@ public class Decompressor {
      * @throws IOException if an error occurs while reading
      */
     public boolean readSTF(BitInputStream bis) throws IOException {
+        if (bis == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: decode(). Input BitInputStream cannot be null.");
+        }
+
         // STF format, determine the size of the tree
         int size = bis.readBits(IHuffConstants.BITS_PER_INT);
-        if (size < 0) {
-            viewer.showError("Error reading compressed file. Unexpected end of input.");
+        if (size <= 0) {
+            viewer.showError("Error reading compressed file. Invalid tree size.");
             return false;
         }
         // gather the tree builder bits in a separate array to access index
@@ -130,8 +147,11 @@ public class Decompressor {
         }
         // use a one-element array to keep track of the index in the recursive helper
         int[] index = new int[1];
-        // rebuild the Huffman tree using preorder encoding
+        // tree must be rebuilt because decoding requires the original structure
         TreeNode rebuilt = rebuildTree(bits, index);
+        if (rebuilt == null) {
+            return false;
+        }
         // make sure all bits were used
         if (index[0] != bits.length) {
             viewer.showError("Error reading compressed file. Malformed tree header.");
@@ -140,7 +160,6 @@ public class Decompressor {
         // needed because the decoder uses the instance variable to read the bits
         tree = new HuffmanTree(rebuilt);
         return true;
-
     }
 
     /**
@@ -152,14 +171,21 @@ public class Decompressor {
     private TreeNode rebuildTree(int[] bits, int[] index) {
         // ensure we do not read past end of header
         if (index[0] >= bits.length) {
-            throw new IllegalStateException("Tree header ended unexpectedly.");
+            viewer.showError("Tree header ended unexpectedly.");
+            return null;
         }
         int bit = bits[index[0]];
         index[0]++;
         if (bit == 0) {
             // recursive step, internal node, create children and repeat construction for them
             TreeNode left = rebuildTree(bits, index);
+            if (left == null) {
+                return null;
+            }
             TreeNode right = rebuildTree(bits, index);
+            if (right == null) {
+                return null;
+            }
             return new TreeNode(left, -1, right);
         }
         else {
@@ -168,7 +194,8 @@ public class Decompressor {
             for (int i = 0; i < IHuffConstants.BITS_PER_WORD + 1; i++) {
                 // ensure no out-of-bounds read
                 if (index[0] >= bits.length) {
-                    throw new IllegalStateException("Tree header ended inside leaf value.");
+                    viewer.showError("Tree header ended inside leaf value.");
+                    return null;
                 }
                 // shift current value left and add the next bit to build the 9-bit leaf value
                 value = (value << 1) | bits[index[0]];
@@ -181,7 +208,7 @@ public class Decompressor {
     /**
      * Decode all compressed bits from the input stream and write the corresponding uncompressed
      * bytes to the output stream.
-     * pre: bis != null && out != null && tree != null
+     * pre: bis != null && out != null
      * post: uncompressed data written to out
      * @param bis the BitInputStream providing compressed bits
      * @param out the OutputStream to which uncompressed bytes are written
@@ -189,16 +216,47 @@ public class Decompressor {
      * @throws IOException if an error occurs during reading or writing
      */
     public int decode(BitInputStream bis, OutputStream out) throws IOException {
-        // TODO: Walk tree using bits from bis
-        // TODO: At leaf node: write the byte (unless it's PSEUDO_EOF)
-        // TODO: Stop decoding when PSEUDO_EOF reached
-        // TODO: Track number of bits written
-        return 0;
+        if (bis == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: decode(). Input BitInputStream cannot be null.");
+        }
+        if (out == null) {
+            throw new IllegalArgumentException("Violation of pre: decode(). OutputStream is null.");
+        }
+        if (tree == null || tree.getRoot() == null) {
+            viewer.showError("Error. No Huffman tree found.");
+            return -1;
+        }
+
+        TreeNode current = tree.getRoot();
+        int bitsWritten = 0;
+        // decode must run until PSEUDO_EOF because compressed files do not store total bit length
+        while (true) {
+            int bit = bis.readBits(1);
+            if (bit == -1) {
+                viewer.showError("Error reading compressed file. No PSEUDO_EOF value.");
+                return -1;
+            }
+            current = (bit == 0) ? current.getLeft() : current.getRight();
+            if (current.isLeaf()) {
+                // reached leaf, decode compressed value and write uncompressed ver to output
+                int value = current.getValue();
+                if (value == IHuffConstants.PSEUDO_EOF) {
+                    // end of compressed stream, done writing bits
+                    out.flush();
+                    return bitsWritten;
+                }
+                out.write(value);
+                bitsWritten += IHuffConstants.BITS_PER_WORD;
+                // go back to root for the next symbol
+                current = tree.getRoot();
+            }
+        }
     }
 
     /**
      * Return the Huffman tree reconstructed from header data.
-     * pre: tree != null
+     * pre: none
      * post: returns the tree used for decoding
      * @return the reconstructed Huffman tree
      */

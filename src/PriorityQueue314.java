@@ -25,9 +25,8 @@ import java.util.ArrayList;
  * post: constructs an empty priority queue
  */
 public class PriorityQueue314 {
-
     // internal list used to store TreeNodes in priority order
-    private ArrayList<TreeNode> data;
+    private final ArrayList<TreeNode> data;
 
     /**
      * Construct an empty priority queue
