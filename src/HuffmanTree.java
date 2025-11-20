@@ -64,7 +64,8 @@ public class HuffmanTree {
 
     /**
      * Build the Huffman tree using the given frequency table.
-     * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1 && freq[IHuffConstants.PSEUDO_EOF] == 1
+     * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1 &&
+     *      freq[IHuffConstants.PSEUDO_EOF] == 1
      * post: root references the completed Huffman tree containing all values with freq > 0
      * @param freq the frequency array used to construct the Huffman tree
      * @throws IllegalArgumentException if freq violates the precondition
@@ -126,24 +127,36 @@ public class HuffmanTree {
 
     /**
      * Helper method to fill the codes array by traversing the Huffman tree.
-     * pre: codes != null && codes.length == IHuffConstants.ALPH_SIZE + 1
+     * pre: codes != null && codes.length == IHuffConstants.ALPH_SIZE + 1 && path != null
      * post: codes array contains Huffman encodings for all leaf values
      * @param node the current TreeNode in the traversal
      * @param path the bitstring path taken to reach this node
      * @param codes the array to fill with encodings
      */
     private void buildCodes(TreeNode node, String path, String[] codes) {
-        // base case, fell out of tree
-        if (node == null) {
-            return;
+        if (codes == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: buildCodes(). Codes array cannot be null.");
         }
-        if (node.isLeaf()) {
-            // we know this is a leaf, so record the completed path
-            codes[node.getValue()] = path;
-            return;
+        if (codes.length != IHuffConstants.ALPH_SIZE + 1) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: buildCodes(). Codes array has incorrect length.");
         }
-        // recursive step, move in appropriate dir and append path with 1 or 0 depending on dir
-        buildCodes(node.getLeft(), path + "0", codes);
-        buildCodes(node.getRight(), path + "1", codes);
+        if (path == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: buildCodes(). Path cannot be null.");
+        }
+
+        // base case, fell out of tree, no path to encode
+        if (node != null) {
+            if (node.isLeaf()) {
+                // we know this is a leaf, so record the completed path
+                codes[node.getValue()] = path;
+            } else {
+                // recursive step, move in appropriate dir and append path w/ 1 or 0
+                buildCodes(node.getLeft(), path + "0", codes);
+                buildCodes(node.getRight(), path + "1", codes);
+            }
+        }
     }
 }

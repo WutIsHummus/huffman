@@ -37,9 +37,15 @@ public class PriorityQueue314 {
 
     /**
      * Add a node to the queue following ascending frequency order and fair tie-breaking.
+     * pre: node != null
      * @param node the TreeNode to enqueue
      */
     public void enqueue(TreeNode node) {
+        if (node == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: enqueue(). Node cannot be null.");
+        }
+
         int freq = node.getFrequency();
         int i = 0;
         // skip all nodes with strictly lower frequency to ensure lower frequency goes earlier

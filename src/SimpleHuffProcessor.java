@@ -21,8 +21,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public class SimpleHuffProcessor implements IHuffProcessor {
-
+    // viewer for error reporting
     private IHuffViewer myViewer;
+    // helper used for handling decompression operations
+    private Decompressor decompressor;
 
     /**
      * Preprocess data so that compression is possible ---
@@ -72,22 +74,49 @@ public class SimpleHuffProcessor implements IHuffProcessor {
      * uncompressed bits/data to out.
      * @param in is the previously compressed data (not a BitInputStream)
      * @param out is the uncompressed file/stream
-     * @return the number of bits written to the uncompressed file/stream
+     * @return number of bits written to out, or -1 if the compressed stream is invalid
      * @throws IOException if an error occurs while reading from the input file or
      * writing to the output file.
      */
     public int uncompress(InputStream in, OutputStream out) throws IOException {
-	        throw new IOException("uncompress not implemented");
-	        //return 0;
+        if (in == null || out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: uncompress(). InputStream & OutputStream cannot " +
+                            "be null.");
+        }
+
+        BitInputStream bis = new BitInputStream(in);
+        // reset to the beginning of decoding phase only after we know the tree is valid
+        if (!decompressor.readHeader(bis)) {
+            return -1;
+        }
+        return decompressor.decode(bis, out);
     }
 
+    /**
+     * Sets the viewer used for status and error messages, and initializes
+     * the decompressor helper that depends on the viewer.
+     * pre: viewer != null
+     * post: internal viewer and decompressor references set
+     * @param viewer the UI viewer implementation
+     */
     public void setViewer(IHuffViewer viewer) {
+        if (viewer == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: setViewer(). Viewer cannot be null.");
+        }
+
         myViewer = viewer;
+        decompressor = new Decompressor(myViewer);   // add this line
     }
 
-    private void showString(String s){
+    /**
+     * Sends a message through the viewer, if present.
+     * @param phrase the string to show
+     */
+    private void showString(String phrase){
         if (myViewer != null) {
-            myViewer.update(s);
+            myViewer.update(phrase);
         }
     }
 }
