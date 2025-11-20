@@ -16,6 +16,8 @@
  *
  */
 
+import java.io.IOException;
+
 /**
  * A Huffman tree built from a frequency table. Used to generate
  * Huffman codes for compression and to store the tree structure.
@@ -32,6 +34,7 @@ public class HuffmanTree {
      * Construct a Huffman tree from the given frequency table.
      * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1
      * post: root references the completed Huffman tree
+     * 
      * @param freq the frequency array for values 0–255 and PSEUDO_EOF
      */
     public HuffmanTree(int[] freq) {
@@ -40,8 +43,11 @@ public class HuffmanTree {
 
     /**
      * Build the Huffman tree using the given frequency table.
-     * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1 && freq[IHuffConstants.PSEUDO_EOF] == 1
-     * post: root references the completed Huffman tree containing all values with freq > 0
+     * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1 &&
+     * freq[IHuffConstants.PSEUDO_EOF] == 1
+     * post: root references the completed Huffman tree containing all values with
+     * freq > 0
+     * 
      * @param freq the frequency array used to construct the Huffman tree
      * @throws IllegalArgumentException if freq violates the precondition
      */
@@ -61,7 +67,8 @@ public class HuffmanTree {
             }
         }
         while (nodeQueue.size() > 1) {
-            // elements at the front of queue are smallest, so make them the children of parent
+            // elements at the front of queue are smallest, so make them the children of
+            // parent
             TreeNode left = nodeQueue.dequeue();
             TreeNode right = nodeQueue.dequeue();
             TreeNode parent = new TreeNode(left, -1, right);
@@ -76,6 +83,7 @@ public class HuffmanTree {
      * Return the root of the Huffman tree.
      * pre: none
      * post: returns the root TreeNode of this Huffman tree
+     * 
      * @return the root TreeNode
      */
     public TreeNode getRoot() {
@@ -86,8 +94,9 @@ public class HuffmanTree {
      * Generate the Huffman bitstring codes for each value in the tree.
      * pre: root != null
      * post: returns an array of codes for all values present in the tree
+     * 
      * @return an array where codes[v] is the Huffman encoding for value v,
-     * or null if v does not appear in the tree
+     *         or null if v does not appear in the tree
      */
     public String[] makeCodes() {
         if (root == null) {
@@ -100,12 +109,32 @@ public class HuffmanTree {
         return codes;
     }
 
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        stringHelper(root, sb);
+        return sb.toString();
+    }
+
+    private void stringHelper(TreeNode node, StringBuilder sb) {
+        if (node != null) {
+            stringHelper(node.getLeft(), sb);
+
+            stringHelper(node.getRight(), sb);
+            String str = Integer.toBinaryString(node.getValue())+ " " + node.getValue() +": "
+                    + node.getFrequency();
+            sb.append(str);
+            sb.append("\n");
+        }
+    }
+
     /**
      * Helper method to fill the codes array by traversing the Huffman tree.
      * pre: codes != null && codes.length == IHuffConstants.ALPH_SIZE + 1
      * post: codes array contains Huffman encodings for all leaf values
-     * @param node the current TreeNode in the traversal
-     * @param path the bitstring path taken to reach this node
+     * 
+     * @param node  the current TreeNode in the traversal
+     * @param path  the bitstring path taken to reach this node
      * @param codes the array to fill with encodings
      */
     private void buildCodes(TreeNode node, String path, String[] codes) {
@@ -118,8 +147,50 @@ public class HuffmanTree {
             codes[node.getValue()] = path;
             return;
         }
-        // recursive step, move in appropriate dir and append path with 1 or 0 depending on dir
+        // recursive step, move in appropriate dir and append path with 1 or 0 depending
+        // on dir
         buildCodes(node.getLeft(), path + "0", codes);
         buildCodes(node.getRight(), path + "1", codes);
+    }
+
+    /**
+     * Write the tree structure to the output stream using pre-order traversal.
+     * Internal nodes are written as a 0 bit, leaf nodes as a 1 bit followed by 9
+     * bits for the value.
+     * 
+     * pre: out != null
+     * post: tree structure written to output stream
+     * 
+     * @param out the BitOutputStream to write to
+     * @throws IOException if an error occurs during writing
+     */
+    public void writeTree(BitOutputStream out) throws IOException {
+        writeTreeHelper(root, out);
+    }
+
+    /**
+     * Recursive helper for writeTree using pre-order traversal.
+     * 
+     * @param node current node in traversal
+     * @param out  the BitOutputStream to write to
+     * @throws IOException if an error occurs during writing
+     */
+    private void writeTreeHelper(TreeNode node, BitOutputStream out) throws IOException {
+        if (node == null) {
+            return;
+        }
+
+        if (node.isLeaf()) {
+            // Write 1 bit to indicate leaf node
+            out.writeBits(1, 1);
+            // Write 9 bits for the value stored in the leaf
+            out.writeBits(IHuffConstants.BITS_PER_WORD + 1, node.getValue());
+        } else {
+            // Write 0 bit to indicate internal node
+            out.writeBits(1, 0);
+            // Recursively write left and right subtrees
+            writeTreeHelper(node.getLeft(), out);
+            writeTreeHelper(node.getRight(), out);
+        }
     }
 }
