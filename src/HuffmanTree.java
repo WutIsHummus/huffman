@@ -3,7 +3,7 @@
  *  On OUR honor, Alperen Aydin and Harshal Dhaduk, this programming assignment is OUR own work
  *  and WE have not provided this code to any other student.
  *
- *  Number of slip days used: 0
+ *  Number of slip days used: 1
  *
  *  Student 1 (Student whose Canvas account is being used)
  *  UTEID: hd8446
@@ -16,12 +16,9 @@
  *
  */
 
-import java.io.IOException;
-
 /**
- * A Huffman tree built from a frequency table. Used to generate
- * Huffman codes for compression and to store the tree structure.
- *
+ * A Huffman tree built from a frequency table. Used to generate Huffman codes for compression
+ * and to store the tree structure.
  * pre: none
  * post: tree is constructed after calling constructor
  */
@@ -33,7 +30,6 @@ public class HuffmanTree {
      * Construct a Huffman tree from the given frequency table.
      * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1
      * post: root references the completed Huffman tree
-     * 
      * @param freq the frequency array for values 0–255 and PSEUDO_EOF
      */
     public HuffmanTree(int[] freq) {
@@ -105,7 +101,6 @@ public class HuffmanTree {
      * Return the root of the Huffman tree.
      * pre: none
      * post: returns the root TreeNode of this Huffman tree
-     * 
      * @return the root TreeNode
      */
     public TreeNode getRoot() {
@@ -116,7 +111,6 @@ public class HuffmanTree {
      * Generate the Huffman bitstring codes for each value in the tree.
      * pre: root != null
      * post: returns an array of codes for all values present in the tree
-     * 
      * @return an array where codes[v] is the Huffman encoding for value v,
      *         or null if v does not appear in the tree
      */
@@ -127,62 +121,63 @@ public class HuffmanTree {
         }
 
         String[] codes = new String[IHuffConstants.ALPH_SIZE + 1];
-        buildCodes(root, "", codes);
+        buildCodes(root, new StringBuilder(), codes);
         return codes;
     }
 
     /**
      * Helper method to fill the codes array by traversing the Huffman tree.
-     * pre: codes != null && codes.length == IHuffConstants.ALPH_SIZE + 1 && path != null
+     * pre: none
      * post: codes array contains Huffman encodings for all leaf values
-     *
      * @param node  the current TreeNode in the traversal
      * @param path  the bitstring path taken to reach this node
      * @param codes the array to fill with encodings
      */
-    private void buildCodes(TreeNode node, String path, String[] codes) {
-        if (codes == null) {
-            throw new IllegalArgumentException(
-                    "Violation of precondition: buildCodes(). Codes array cannot be null.");
-        }
-        if (codes.length != IHuffConstants.ALPH_SIZE + 1) {
-            throw new IllegalArgumentException(
-                    "Violation of precondition: buildCodes(). Codes array has incorrect length.");
-        }
-        if (path == null) {
-            throw new IllegalArgumentException(
-                    "Violation of precondition: buildCodes(). Path cannot be null.");
-        }
-
+    private void buildCodes(TreeNode node, StringBuilder path, String[] codes) {
         // base case, fell out of tree, no path to encode
         if (node != null) {
             if (node.isLeaf()) {
                 // we know this is a leaf, so record the completed path
-                codes[node.getValue()] = path;
+                codes[node.getValue()] = path.toString();
             } else {
                 // recursive step, move in appropriate dir and append path w/ 1 or 0
-                buildCodes(node.getLeft(), path + "0", codes);
-                buildCodes(node.getRight(), path + "1", codes);
+                path.append('0');
+                buildCodes(node.getLeft(), path, codes);
+                path.deleteCharAt(path.length() - 1);
+                path.append('1');
+                buildCodes(node.getRight(), path, codes);
+                path.deleteCharAt(path.length() - 1);
             }
         }
     }
 
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
-        stringHelper(root, sb);
-        return sb.toString();
+    /**
+     * Returns the number of bits needed to encode this Huffman tree in STF.
+     * @return total preorder-encoding size in bits
+     */
+    public int computeTreeSize() {
+        return computeTreeSize(root);
     }
 
-    private void stringHelper(TreeNode node, StringBuilder sb) {
-        if (node != null) {
-            stringHelper(node.getLeft(), sb);
-
-            stringHelper(node.getRight(), sb);
-            String str = Integer.toBinaryString(node.getValue())+ " " + node.getValue() +": "
-                    + node.getFrequency();
-            sb.append(str);
-            sb.append("\n");
+    /**
+     * Recursive helper. Computes the number of bits required to store the Huffman tree in STF
+     * using a preorder traversal.
+     * pre: none
+     * post: returns the size, in bits, of the preorder tree encoding
+     * @param node the current node in the Huffman tree
+     * @return total bits needed to encode the subtree rooted at {@code node}
+     */
+    public int computeTreeSize(TreeNode node) {
+        if (node == null) {
+            // base case, reached end of tree, null nodes are not written in headers
+            return 0;
         }
+        if (node.isLeaf()) {
+            // leaf node, 1 bit for the leaf flag + 9 bits for the stored value
+            return 1 + (IHuffConstants.BITS_PER_WORD + 1);
+        }
+        // else internal node, recursively compute the size of left and right subtrees + 1 bit for
+        // the internal node
+        return 1 + computeTreeSize(node.getLeft()) + computeTreeSize(node.getRight());
     }
 }

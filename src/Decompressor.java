@@ -3,7 +3,7 @@
  *  On OUR honor, Alperen Aydin and Harshal Dhaduk, this programming assignment is OUR own work
  *  and WE have not provided this code to any other student.
  *
- *  Number of slip days used: 0
+ *  Number of slip days used: 1
  *
  *  Student 1 (Student whose Canvas account is being used)
  *  UTEID: hd8446
@@ -20,8 +20,8 @@ import java.io.OutputStream;
 import java.io.IOException;
 
 /**
- * A class used by SimpleHuffProcessor to perform file decompression. Handles reading
- * header information, reconstructing the Huffman tree, and decoding the compressed bitstream.
+ * Handles reading header information, reconstructing the Huffman tree, and decoding the
+ * compressed bitstream.
  * pre: none
  * post: provides methods for decoding Huffman-compressed data
  */
@@ -135,26 +135,13 @@ public class Decompressor {
             viewer.showError("Error reading compressed file. Invalid tree size.");
             return false;
         }
-        // gather the tree builder bits in a separate array to access index
-        int[] bits = new int[size];
-        for (int i = 0; i < size; i++) {
-            int bit = bis.readBits(1);
-            if (bit < 0) {
-                viewer.showError("Error reading compressed file. Tree header is incomplete.");
-                return false;
-            }
-            bits[i] = bit;
-        }
-        // use a one-element array to keep track of the index in the recursive helper
-        int[] index = new int[1];
+        // we must track how many bits rebuildTree consumes
+        int[] bitsUsed = new int[]{0};
         // tree must be rebuilt because decoding requires the original structure
-        TreeNode rebuilt = rebuildTree(bits, index);
-        if (rebuilt == null) {
-            return false;
-        }
-        // make sure all bits were used
-        if (index[0] != bits.length) {
-            viewer.showError("Error reading compressed file. Malformed tree header.");
+        TreeNode rebuilt = rebuildTree(bis, size, bitsUsed);
+        // ensure the tree consumed EXACTLY the specified number of bits
+        if (rebuilt == null || bitsUsed[0] != size) {
+            viewer.showError("Error reading compressed file. Tree header size mismatch.");
             return false;
         }
         // needed because the decoder uses the instance variable to read the bits
@@ -164,43 +151,45 @@ public class Decompressor {
 
     /**
      * Helper to rebuild a Huffman tree from preorder bit encoding.
-     * @param bits array of bits describing the tree
-     * @param index single-element array used as mutable index
+     * @param bis array of bits describing the tree
+     * @param maxBits the total number of bits specified in the header representing the entire tree
+     * @param usedBits a single-element array storing how many bits have been read
      * @return root of rebuilt tree
+     * @throws IOException if an error occurs while reading
      */
-    private TreeNode rebuildTree(int[] bits, int[] index) {
-        // ensure we do not read past end of header
-        if (index[0] >= bits.length) {
+    private TreeNode rebuildTree(BitInputStream bis, int maxBits, int[] usedBits) throws IOException {
+        if (usedBits[0] >= maxBits) {
             viewer.showError("Tree header ended unexpectedly.");
             return null;
         }
-        int bit = bits[index[0]];
-        index[0]++;
-        if (bit == 0) {
+        int flag = bis.readBits(1);
+        if (flag < 0) {
+            viewer.showError("Tree header ended unexpectedly.");
+            return null;
+        }
+        usedBits[0]++;
+        if (flag == 0) {
             // recursive step, internal node, create children and repeat construction for them
-            TreeNode left = rebuildTree(bits, index);
-            if (left == null) {
-                return null;
-            }
-            TreeNode right = rebuildTree(bits, index);
-            if (right == null) {
+            TreeNode left  = rebuildTree(bis, maxBits, usedBits);
+            TreeNode right = (left == null) ? null : rebuildTree(bis, maxBits, usedBits);
+            if (left == null || right == null) {
                 return null;
             }
             return new TreeNode(left, -1, right);
         }
         else {
             // leaf node, read next 9 bits for the value
-            int value = 0;
-            for (int i = 0; i < IHuffConstants.BITS_PER_WORD + 1; i++) {
-                // ensure no out-of-bounds read
-                if (index[0] >= bits.length) {
-                    viewer.showError("Tree header ended inside leaf value.");
-                    return null;
-                }
-                // shift current value left and add the next bit to build the 9-bit leaf value
-                value = (value << 1) | bits[index[0]];
-                index[0]++;
+            // ensure the 9 leaf bits fit within the declared header size
+            if (usedBits[0] + (IHuffConstants.BITS_PER_WORD + 1) > maxBits) {
+                viewer.showError("Tree header ended inside leaf value.");
+                return null;
             }
+            int value = bis.readBits(IHuffConstants.BITS_PER_WORD + 1);
+            if (value < 0) {
+                viewer.showError("Tree header ended inside leaf value.");
+                return null;
+            }
+            usedBits[0] += IHuffConstants.BITS_PER_WORD + 1;
             return new TreeNode(value, 0);
         }
     }

@@ -3,7 +3,7 @@
  *  On OUR honor, Alperen Aydin and Harshal Dhaduk, this programming assignment is OUR own work
  *  and WE have not provided this code to any other student.
  *
- *  Number of slip days used: 0
+ *  Number of slip days used: 1
  *
  *  Student 1:
  *  UTEID: hd8446
@@ -19,6 +19,7 @@
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 
 /**
  * Handles building the Huffman tree, generating codes, writing headers and encoding
@@ -35,9 +36,10 @@ public class Compressor implements IHuffConstants {
     private String[] codes;
 
     /**
-     * Create a compressor storing a defensive copy of the frequency table.
-     * pre: f != null && f.length == ALPH_SIZE + 1
-     * post: internal frequency array initialized
+     * Constructs a Compressor by storing a defensive copy of the frequency table.
+     * pre: freqs != null && freqs.length == ALPH_SIZE + 1
+     * post: internal frequency table initialized
+     * @param freqs the frequency table including the pseudo-EOF slot
      */
     public Compressor(int[] freqs) {
         if (freqs == null || freqs.length != ALPH_SIZE + 1) {
@@ -46,26 +48,24 @@ public class Compressor implements IHuffConstants {
         }
 
         this.freqs = new int[ALPH_SIZE + 1];
-        for (int i = 0; i < freqs.length; i++) {
-            this.freqs[i] = freqs[i];
-        }
+        System.arraycopy(freqs, 0, this.freqs, 0, freqs.length);
         // ensure PSEUDO_EOF always has frequency 1 to indicate end of array
         this.freqs[PSEUDO_EOF] = 1;
     }
 
     /**
-     * Build the Huffman tree.
+     * Builds the Huffman tree using the stored frequency table.
      * pre: none
-     * post: tree initialized
+     * post: tree is initialized
      */
     public void buildTree() {
         tree = new HuffmanTree(freqs);
     }
 
     /**
-     * Build the Huffman codes from the tree.
+     * Generates Huffman codes by traversing the constructed Huffman tree.
      * pre: tree != null
-     * post: codes array initialized
+     * post: codes[] initialized with a bitstring for each symbol
      */
     public void buildCodes() {
         if (tree == null) {
@@ -77,9 +77,10 @@ public class Compressor implements IHuffConstants {
     }
 
     /**
-     * Accessor for codes array during preprocessing estimation.
+     * Returns the internal Huffman code map for preprocessing estimation.
      * pre: codes != null
-     * post: returns internal code map
+     * post: returns reference to internal code array
+     * @return the array of Huffman codes
      */
     public String[] getCodesForEstimate() {
         if (codes == null) {
@@ -87,13 +88,29 @@ public class Compressor implements IHuffConstants {
                     "Codes not built yet.");
         }
 
-        return codes;
+        return Arrays.copyOf(codes, codes.length);
     }
 
     /**
-     * Write the full compressed file: magic, header, encoded data.
+     * Returns the Huffman tree built during preprocessing.
+     * pre: tree != null
+     * post: returns the internal HuffmanTree used for encoding
+     * @return the constructed Huffman tree
+     */
+    public HuffmanTree getTree() {
+        return tree;
+    }
+
+    /**
+     * Writes the full Huffman-compressed output file: magic number, header, encoded data, and
+     * pseudo-EOF.
      * pre: rawIn != null && rawOut != null && codes != null
-     * post: compressed file written
+     * post: compressed output written to rawOut
+     * @param rawIn the raw uncompressed input stream
+     * @param rawOut the output stream to receive compressed bits
+     * @param headerFormat STORE_COUNTS or STORE_TREE
+     * @return number of bits written
+     * @throws IOException if an I/O error occurs while writing
      */
     public int writeCompressed(InputStream rawIn, OutputStream rawOut, int headerFormat)
             throws IOException {
@@ -113,13 +130,19 @@ public class Compressor implements IHuffConstants {
         bits += writeData(rawIn, out);
         bits += writeEOF(out);
         out.close();
+        // reset internal state so future operations must call preprocess again
+        tree = null;
+        codes = null;
         return bits;
     }
 
     /**
-     * Writes the magic number and the header format.
+     * Writes the magic number and the header-format constant.
      * pre: out != null
-     * post: two 32-bit values written
+     * post: two 32-bit ints written
+     * @param out the BitOutputStream to write into
+     * @param headerFormat STORE_COUNTS or STORE_TREE
+     * @return number of bits written (always 64)
      */
     private int writeMagicAndFormat(BitOutputStream out, int headerFormat) {
         if (out == null) {
@@ -133,11 +156,14 @@ public class Compressor implements IHuffConstants {
     }
 
     /**
-     * Writes either SCF or STF header.
+     * Writes either the SCF or STF header.
      * pre: out != null
      * post: header bits written
+     * @param out BitOutputStream receiving header bits
+     * @param format STORE_COUNTS or STORE_TREE
+     * @return number of bits written
      */
-    private int writeHeader(BitOutputStream out, int format) throws IOException {
+    private int writeHeader(BitOutputStream out, int format) {
         if (out == null) {
             throw new IllegalArgumentException("Violation of precondition: writeHeader(). Output " +
                     "stream cannot be null.");
@@ -152,9 +178,11 @@ public class Compressor implements IHuffConstants {
     }
 
     /**
-     * Standard Count Format header: 256 32-bit frequencies.
+     * Writes Standard Count Format: 256 integer frequencies.
      * pre: out != null
-     * post: SCF written
+     * post: SCF header written
+     * @param out BitOutputStream for writing counts
+     * @return total bits written (256 * 32)
      */
     private int writeSCF(BitOutputStream out) {
         if (out == null) {
@@ -172,41 +200,47 @@ public class Compressor implements IHuffConstants {
     }
 
     /**
-     * Standard Tree Format header: 32-bit size + preorder bits.
+     * Writes Standard Tree Format: 32-bit tree size + preorder tree encoding.
      * pre: out != null && tree != null
-     * post: STF written
+     * post: STF header written
+     * @param out BitOutputStream for writing the STF header
+     * @return number of bits written
      */
-    private int writeSTF(BitOutputStream out) throws IOException {
-        int size = computeTreeSize(tree.getRoot());
+    private int writeSTF(BitOutputStream out) {
+        if (out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeSTF(). Output stream cannot be null.");
+        }
+        if (tree == null || tree.getRoot() == null) {
+            throw new IllegalStateException(
+                    "Violation of precondition: writeSTF(). Huffman tree must be built first.");
+        }
+
+        int size = tree.computeTreeSize();
         // write the total number of bits in the preorder tree encoding
         out.writeBits(BITS_PER_INT, size);
         return BITS_PER_INT + writeTreeBits(out, tree.getRoot());
     }
 
     /**
-     * Compute preorder tree size in bits.
-     * pre: none
-     * post: returns size in bits
+     * Writes a preorder representation of the Huffman tree: 0 for internal nodes, 1 + 9 bits for
+     * leaf nodes.
+     * pre: out != null && node != null
+     * post: preorder structure written to out
+     * @param out BitOutputStream receiving preorder bits
+     * @param node current node in the tree
+     * @return number of bits written
      */
-    private int computeTreeSize(TreeNode node) {
+    private int writeTreeBits(BitOutputStream out, TreeNode node) {
+        if (out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeTreeBits(). Output stream cannot be null.");
+        }
         if (node == null) {
-            // null nodes are not written into the header
-            return 0;
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeTreeBits(). Node cannot be null.");
         }
-        if (node.isLeaf()) {
-            // leaf node, contributes 1 bit for the leaf flag + 9 bits for the stored value
-            return 1 + (BITS_PER_WORD + 1);
-        }
-        // internal node contributes 1 bit plus its children’s sizes
-        return 1 + computeTreeSize(node.getLeft()) + computeTreeSize(node.getRight());
-    }
 
-    /**
-     * Write preorder structure: 0 for internal, 1 + 9 bits for leaf.
-     * pre: out != null
-     * post: preorder bits written
-     */
-    private int writeTreeBits(BitOutputStream out, TreeNode node) throws IOException {
         // base case, leaf node, reached the end of the current path
         if (node.isLeaf()) {
             // write a 1 to mark it as a leaf
@@ -225,38 +259,79 @@ public class Compressor implements IHuffConstants {
     }
 
     /**
-     * Write encoded data chunks.
+     * Writes the encoded Huffman bitstrings for each byte in the input stream.
      * pre: rawIn != null && out != null && codes != null
-     * post: encodings written to out
+     * post: encoded data bits written
+     * @param rawIn the uncompressed input stream
+     * @param out BitOutputStream receiving encoded data
+     * @return number of data bits written
+     * @throws IOException if input or output fails
      */
     private int writeData(InputStream rawIn, BitOutputStream out) throws IOException {
+        if (rawIn == null || out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeData(). Input and output streams" +
+                            " cannot be null.");
+        }
+        if (codes == null) {
+            throw new IllegalStateException(
+                    "Violation of precondition: writeData(). Codes must be built first.");
+        }
+
         BitInputStream in = new BitInputStream(rawIn);
         int bits = 0;
         int value = in.readBits(BITS_PER_WORD);
         while (value != -1) {
             // retrieve the huffman bitstring for the byte value
-            String code = codes[value];
-            for (int i = 0; i < code.length(); i++) {
-                // convert the character into the corresponding numeric bit
-                out.writeBits(1, code.charAt(i) == '1' ? 1 : 0);
-                bits++;
-            }
+            bits += writeCode(out, codes[value]);
             value = in.readBits(BITS_PER_WORD);
         }
         return bits;
     }
 
     /**
-     * Writes the pseudo-EOF code at end of data.
-     * pre: out != null
-     * post: EOF bits written
+     * Writes the Huffman code for the pseudo-EOF marker.
+     * pre: out != null && codes != null
+     * post: EOF code written
+     * @param out BitOutputStream receiving EOF bits
+     * @return number of bits written
      */
     private int writeEOF(BitOutputStream out) {
-        String eof = codes[PSEUDO_EOF];
-        for (int i = 0; i < eof.length(); i++) {
-            // convert the character into the corresponding numeric bit
-            out.writeBits(1, eof.charAt(i) == '1' ? 1 : 0);
+        if (out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeEOF(). Output stream cannot be null.");
         }
-        return eof.length();
+        if (codes == null) {
+            throw new IllegalStateException(
+                    "Violation of precondition: writeEOF(). Codes must be built first.");
+        }
+
+        return writeCode(out, codes[PSEUDO_EOF]);
+    }
+
+    /**
+     * Write a Huffman code bit-by-bit to the BitOutputStream.
+     * pre: out != null && code != null
+     * post: all bits of code written, returns number of bits written
+     * @param out the BitOutputStream to write to
+     * @param code the string of '0'/'1' characters representing the Huffman code
+     * @return number of bits written
+     */
+    private int writeCode(BitOutputStream out, String code) {
+        if (out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeCode(). Output stream cannot be null.");
+        }
+        if (code == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeCode(). Code string cannot be null.");
+        }
+
+        int bits = 0;
+        for (int i = 0; i < code.length(); i++) {
+            out.writeBits(1, code.charAt(i) == '1' ? 1 : 0);
+            bits++;
+        }
+        return bits;
     }
 }
