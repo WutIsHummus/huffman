@@ -51,21 +51,6 @@ public class HuffmanTree {
     }
 
     /**
-     * Construct a HuffmanTree directly from a given root.
-     * pre: root != null
-     * post: this.root == root
-     * @param root the reconstructed Huffman tree root
-     */
-    public HuffmanTree(TreeNode root) {
-        if (root == null) {
-            throw new IllegalArgumentException(
-                    "Violation of precondition: HuffmanTree(TreeNode). Root cannot be null.");
-        }
-
-        this.root = root;
-    }
-
-    /**
      * Build the Huffman tree using the given frequency table.
      * pre: freq != null && freq.length == IHuffConstants.ALPH_SIZE + 1 &&
      *      freq[IHuffConstants.PSEUDO_EOF] == 1
@@ -102,6 +87,21 @@ public class HuffmanTree {
     }
 
     /**
+     * Construct a HuffmanTree directly from a given root.
+     * pre: root != null
+     * post: this.root == root
+     * @param root the reconstructed Huffman tree root
+     */
+    public HuffmanTree(TreeNode root) {
+        if (root == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: HuffmanTree(TreeNode). Root cannot be null.");
+        }
+
+        this.root = root;
+    }
+
+    /**
      * Return the root of the Huffman tree.
      * pre: none
      * post: returns the root TreeNode of this Huffman tree
@@ -131,30 +131,11 @@ public class HuffmanTree {
         return codes;
     }
 
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
-        stringHelper(root, sb);
-        return sb.toString();
-    }
-
-    private void stringHelper(TreeNode node, StringBuilder sb) {
-        if (node != null) {
-            stringHelper(node.getLeft(), sb);
-
-            stringHelper(node.getRight(), sb);
-            String str = Integer.toBinaryString(node.getValue())+ " " + node.getValue() +": "
-                    + node.getFrequency();
-            sb.append(str);
-            sb.append("\n");
-        }
-    }
-
     /**
      * Helper method to fill the codes array by traversing the Huffman tree.
      * pre: codes != null && codes.length == IHuffConstants.ALPH_SIZE + 1 && path != null
      * post: codes array contains Huffman encodings for all leaf values
-     * 
+     *
      * @param node  the current TreeNode in the traversal
      * @param path  the bitstring path taken to reach this node
      * @param codes the array to fill with encodings
@@ -186,44 +167,22 @@ public class HuffmanTree {
         }
     }
 
-    /**
-     * Write the tree structure to the output stream using pre-order traversal.
-     * Internal nodes are written as a 0 bit, leaf nodes as a 1 bit followed by 9
-     * bits for the value.
-     * 
-     * pre: out != null
-     * post: tree structure written to output stream
-     * 
-     * @param out the BitOutputStream to write to
-     * @throws IOException if an error occurs during writing
-     */
-    public void writeTree(BitOutputStream out) throws IOException {
-        writeTreeHelper(root, out);
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        stringHelper(root, sb);
+        return sb.toString();
     }
 
-    /**
-     * Recursive helper for writeTree using pre-order traversal.
-     * 
-     * @param node current node in traversal
-     * @param out  the BitOutputStream to write to
-     * @throws IOException if an error occurs during writing
-     */
-    private void writeTreeHelper(TreeNode node, BitOutputStream out) throws IOException {
-        if (node == null) {
-            return;
-        }
+    private void stringHelper(TreeNode node, StringBuilder sb) {
+        if (node != null) {
+            stringHelper(node.getLeft(), sb);
 
-        if (node.isLeaf()) {
-            // Write 1 bit to indicate leaf node
-            out.writeBits(1, 1);
-            // Write 9 bits for the value stored in the leaf
-            out.writeBits(IHuffConstants.BITS_PER_WORD + 1, node.getValue());
-        } else {
-            // Write 0 bit to indicate internal node
-            out.writeBits(1, 0);
-            // Recursively write left and right subtrees
-            writeTreeHelper(node.getLeft(), out);
-            writeTreeHelper(node.getRight(), out);
+            stringHelper(node.getRight(), sb);
+            String str = Integer.toBinaryString(node.getValue())+ " " + node.getValue() +": "
+                    + node.getFrequency();
+            sb.append(str);
+            sb.append("\n");
         }
     }
 }

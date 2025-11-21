@@ -21,143 +21,121 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public class SimpleHuffProcessor implements IHuffProcessor {
-    // viewer for error reporting
+
+    // viewer for reporting status/errors
     private IHuffViewer myViewer;
-    // helper used for handling decompression operations
+
+    // used for decompression
     private Decompressor decompressor;
-    private int[] freqTable;
-    private HuffmanTree huffTree;
-    private String[] codes;
-    private Compressor compressor;
-    private int originalBitCount;
-    private int projectedCompressedBits;
-    private int storedHeaderFormat;
-    private boolean readyForCompress;
+
+    // ===== state saved from preprocess =====
+    private int[] freqs;               // frequency table
+    private Compressor compressor;     // compressor object
+    private int headerFormat;          // SCF or STF
+    private int estimatedCompressed;   // estimated compressed size
+    private int originalBits;          // uncompressed size in bits
+
 
     /**
-     * Preprocess data so that compression is possible ---
-     * count characters/create tree/store state so that
-     * a subsequent call to compress will work. The InputStream
-     * is <em>not</em> a BitInputStream, so wrap it int one as needed.
-     * 
-     * @param in           is the stream which could be subsequently compressed
-     * @param headerFormat a constant from IHuffProcessor that determines what kind
-     *                     of
-     *                     header to use, standard count format, standard tree
-     *                     format, or
-     *                     possibly some format added in the future.
-     * @return number of bits saved by compression or some other measure
-     *         Note, to determine the number of
-     *         bits saved, the number of bits written includes
-     *         ALL bits that will be written including the
-     *         magic number, the header format number, the header to
-     *         reproduce the tree, AND the actual data.
-     * @throws IOException if an error occurs while reading from the input file.
+     * Preprocesses the input:
+     *  - builds frequency table
+     *  - builds the Huffman tree + codes
+     *  - computes estimated compressed size
+     *  - returns bits saved (original − estimated)
      */
     @Override
     public int preprocessCompress(InputStream in, int headerFormat) throws IOException {
+
         if (in == null) {
-            throw new IOException("Input stream cannot be null");
+            throw new IllegalArgumentException(
+                    "Violation of precondition: preprocessCompress(). InputStream cannot be null.");
         }
 
-        resetState();
-        storedHeaderFormat = headerFormat;
-        freqTable = new int[IHuffConstants.ALPH_SIZE + 1];
+        this.headerFormat = headerFormat;
 
-        try (BitInputStream bitIn = new BitInputStream(in)) {
-            int value;
-            // count every byte while tracking the raw bit total for later comparisons
-            while ((value = bitIn.readBits(IHuffConstants.BITS_PER_WORD)) != -1) {
-                freqTable[value]++;
-                originalBitCount += IHuffConstants.BITS_PER_WORD;
-            }
+        // ============= BUILD FREQUENCY TABLE =============
+        freqs = new int[ALPH_SIZE + 1];
+        BitInputStream bis = new BitInputStream(in);
+        int value = bis.readBits(BITS_PER_WORD);
+
+        originalBits = 0;
+        while (value != -1) {
+            freqs[value]++;
+            originalBits += BITS_PER_WORD;
+            value = bis.readBits(BITS_PER_WORD);
         }
 
-        // force the sentinel into the table so the tree always has an EOF leaf
-        freqTable[IHuffConstants.PSEUDO_EOF] = 1;
-        huffTree = new HuffmanTree(freqTable);
-        codes = huffTree.makeCodes();
-        // cache a compressor so the actual compress call never has to rebuild
-        // structures
-        compressor = new Compressor(freqTable, codes, huffTree, storedHeaderFormat);
-        projectedCompressedBits = compressor.computeCompressedBits(null);
-        readyForCompress = true;
+        // include EOF always
+        freqs[PSEUDO_EOF] = 1;
 
-        int bitsSaved = originalBitCount - projectedCompressedBits;
-        logFrequencies();
-        return bitsSaved;
+        // ============= SET UP COMPRESSOR =============
+        compressor = new Compressor(freqs);
+        compressor.buildTree();
+        compressor.buildCodes();
+
+        // ============= ESTIMATE COMPRESSED SIZE =============
+        estimatedCompressed = estimateCompressedSize(freqs, compressor, headerFormat);
+
+        return originalBits - estimatedCompressed;
     }
 
+
     /**
-     * Compresses input to output, where the same InputStream has
-     * previously been pre-processed via <code>preprocessCompress</code>
-     * storing state used by this call.
-     * <br>
-     * pre: <code>preprocessCompress</code> must be called before this method
-     * 
-     * @param in    is the stream being compressed (NOT a BitInputStream)
-     * @param out   is bound to a file/stream to which bits are written
-     *              for the compressed file (not a BitOutputStream)
-     * @param force if this is true create the output file even if it is larger than
-     *              the input file.
-     *              If this is false do not create the output file if it is larger
-     *              than the input file.
-     * @return the number of bits written.
-     * @throws IOException if an error occurs while reading from the input file or
-     *                     writing to the output file.
+     * Performs the actual compression using the results from preprocessCompress.
+     * Requires a FRESH input stream.
      */
     @Override
     public int compress(InputStream in, OutputStream out, boolean force) throws IOException {
-        if (!readyForCompress || compressor == null) {
-            throw new IOException("Must call preprocessCompress before compress");
-        }
+
         if (in == null || out == null) {
-            throw new IOException("Input and output streams must be non-null");
+            throw new IllegalArgumentException(
+                    "Violation of precondition: compress(). Streams cannot be null.");
         }
 
-        if (!force && projectedCompressedBits >= originalBitCount) {
-            showString("Compression would not reduce size; rerun with force=true to proceed.");
-            throw new IOException("Compression rejected because it would not save space");
+        if (compressor == null || freqs == null) {
+            throw new IllegalStateException(
+                    "Violation of precondition: preprocessCompress must be called first.");
         }
 
-        int bitsWritten = compressor.writeCompressedFile(in, out);
-        showString("Compression complete. Bits written: " + bitsWritten);
-        return bitsWritten;
+        // If not forcing AND compression does not save space:
+        // (i.e., estimatedCompressed >= originalBits)
+        if (!force && estimatedCompressed >= originalBits) {
+            if (myViewer != null) {
+                myViewer.showError("Compressed file is not smaller. Use force to write anyway.");
+            }
+            return -1; // per assignment convention
+        }
+
+        // Now write actual compressed data
+        return compressor.writeCompressed(in, out, headerFormat);
     }
 
+
     /**
-     * Uncompress a previously compressed stream in, writing the
-     * uncompressed bits/data to out.
-     * 
-     * @param in  is the previously compressed data (not a BitInputStream)
-     * @param out is the uncompressed file/stream
-     * @return number of bits written to out, or -1 if the compressed stream is invalid
-     * @throws IOException if an error occurs while reading from the input file or
-     *                     writing to the output file.
+     * Uncompresses the previous Huffman-compressed input.
      */
     @Override
     public int uncompress(InputStream in, OutputStream out) throws IOException {
+
         if (in == null || out == null) {
             throw new IllegalArgumentException(
-                    "Violation of precondition: uncompress(). InputStream & OutputStream cannot " +
-                            "be null.");
+                    "Violation of precondition: uncompress(). Streams cannot be null.");
         }
 
         BitInputStream bis = new BitInputStream(in);
-        // reset to the beginning of decoding phase only after we know the tree is valid
+
         if (!decompressor.readHeader(bis)) {
             return -1;
         }
+
         return decompressor.decode(bis, out);
     }
 
+
     /**
-     * Sets the viewer used for status and error messages, and initializes
-     * the decompressor helper that depends on the viewer.
-     * pre: viewer != null
-     * post: internal viewer and decompressor references set
-     * @param viewer the UI viewer implementation
+     * Sets the viewer for status/error messages.
      */
+    @Override
     public void setViewer(IHuffViewer viewer) {
         if (viewer == null) {
             throw new IllegalArgumentException(
@@ -165,68 +143,60 @@ public class SimpleHuffProcessor implements IHuffProcessor {
         }
 
         myViewer = viewer;
-        decompressor = new Decompressor(myViewer);   // add this line
+        decompressor = new Decompressor(myViewer);
     }
 
-    /**
-     * Sends a message through the viewer, if present.
-     * @param phrase the string to show
-     */
-    private void showString(String s) {
-        if (myViewer != null) {
-            myViewer.update(s);
-        }
-    }
+
+    // ================================================================
+    //                       HELPER METHODS
+    // ================================================================
 
     /**
-     * Print a short digest of the recorded frequencies and codes.
+     * Estimates number of bits in a compressed file using ONLY the frequency table.
      */
-    private void logFrequencies() {
-        if (myViewer == null || freqTable == null) {
-            return;
+    private int estimateCompressedSize(int[] freqs, Compressor c, int format) {
+
+        int bits = 0;
+
+        // MAGIC NUMBER + HEADER FORMAT
+        bits += BITS_PER_INT;
+        bits += BITS_PER_INT;
+
+        // HEADER COST
+        if (format == STORE_COUNTS) {
+            bits += ALPH_SIZE * BITS_PER_INT;
         }
-        StringBuilder sb = new StringBuilder();
-        sb.append("Frequencies (value:count code)\n");
-        for (int value = 0; value < IHuffConstants.ALPH_SIZE; value++) {
-            if (freqTable[value] > 0) {
-                sb.append(formatFreqLine(value, freqTable[value], codes[value]));
+        else { // STORE_TREE
+            // compute size in exactly the same way as Compressor.writeSTFHeader()
+            HuffmanTree tempTree = new HuffmanTree(freqs);
+            int size = computeTreeSize(tempTree.getRoot());
+            bits += BITS_PER_INT; // size integer
+            bits += size;         // preorder bits
+        }
+
+        // DATA COST
+        String[] codes = compressor.getCodesForEstimate();
+
+// add bits for actual data
+        for (int i = 0; i < ALPH_SIZE; i++) {
+            if (freqs[i] > 0 && codes[i] != null) {
+                bits += freqs[i] * codes[i].length();
             }
         }
-        sb.append(formatFreqLine(IHuffConstants.PSEUDO_EOF, freqTable[IHuffConstants.PSEUDO_EOF],
-                codes[IHuffConstants.PSEUDO_EOF]));
-        myViewer.update(sb.toString());
+        bits += codes[PSEUDO_EOF].length();
+
+        return bits;
     }
 
-    /**
-     * Format one line in the frequency report.
-     */
-    private String formatFreqLine(int value, int count, String code) {
-        String label = value == IHuffConstants.PSEUDO_EOF
-                ? "PEOF"
-                : printable(value);
-        String codeText = (code == null || code.isEmpty()) ? "-" : code;
-        return String.format("%4d (%s): %d [%s]%n", value, label, count, codeText);
-    }
 
     /**
-     * Return string character of a int of its ASCII or returns "Non ASCCII "+ value
+     * Computes tree encoding size (same rules as Compressor.computeTreeSize).
      */
-    private String printable(int value) {
-        // Standard ASCII printable range is 32 to 126
-        if (value >= 32 && value < 127) {
-            return Character.toString((char) value);
+    private int computeTreeSize(TreeNode node) {
+        if (node == null) return 0;
+        if (node.isLeaf()) {
+            return 1 + (BITS_PER_WORD + 1);
         }
-        return "Non ASCII " + value;
-    }
-
-    private void resetState() {
-        freqTable = null;
-        huffTree = null;
-        codes = null;
-        compressor = null;
-        originalBitCount = 0;
-        projectedCompressedBits = 0;
-        storedHeaderFormat = 0;
-        readyForCompress = false;
+        return 1 + computeTreeSize(node.getLeft()) + computeTreeSize(node.getRight());
     }
 }

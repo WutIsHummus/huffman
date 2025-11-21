@@ -5,14 +5,14 @@
  *
  *  Number of slip days used: 0
  *
- *  Student 1 (Student whose Canvas account is being used)
+ *  Student 1:
  *  UTEID: hd8446
- *  email address: hd8446@eid.utexas.edu
- *  TA name: Jaxon Dial
+ *  email: hd8446@eid.utexas.edu
+ *  TA: Jaxon Dial
  *
- *  Student 2
+ *  Student 2:
  *  UTEID: aa95287
- *  email address: aa95287@eid.utexas.edu
+ *  email: aa95287@eid.utexas.edu
  *
  */
 
@@ -21,187 +21,242 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
- * Helper to handle compression details and bit writing
+ * Handles building the Huffman tree, generating codes, writing headers and encoding
+ * the raw input into a Huffman-compressed file.
+ * pre: none
+ * post: can write properly formatted .hf bitstreams
  */
-public class Compressor {
-
-    // frequency table generated during preprocessing
-    private final int[] freq;
-
-    // bitstring encodings for all values
-    private final String[] codes;
-
-    // the Huffman tree built during preprocessing
-    private final HuffmanTree tree;
-
-    // the header format chosen by the user (SCF or STF)
-    private final int headerFormat;
+public class Compressor implements IHuffConstants {
+    // frequency table for all symbols incl. pseudo-EOF
+    private final int[] freqs;
+    // Huffman tree and its code map
+    private HuffmanTree tree;
+    // Huffman codes for each value generated during preprocessing
+    private String[] codes;
 
     /**
-     * Store derived data for use in compression
-     * @param freq counts for every symbol plus PSEUDO_EOF
-     * @param codes Huffman codes indexed by value
-     * @param tree Huffman tree built from the counts
-     * @param headerFormat header selection constant
+     * Create a compressor storing a defensive copy of the frequency table.
+     * pre: f != null && f.length == ALPH_SIZE + 1
+     * post: internal frequency array initialized
      */
-    public Compressor(int[] freq, String[] codes, HuffmanTree tree, int headerFormat) {
-        this.freq = freq;
-        this.codes = codes;
-        this.tree = tree;
-        this.headerFormat = headerFormat;
-    }
-
-    /**
-     * Calculate total bits needed for the compressed file
-     * @param in unused, kept for interface compatibility
-     * @return total bits to be written
-     * @throws IOException if reading or writing fails
-     */
-    public int computeCompressedBits(InputStream in) throws IOException {
-        return computeHeaderBits() + computeDataBits();
-    }
-
-    /**
-     * Write the header and compressed data to output
-     * @param in source of original bytes
-     * @param out target for compressed bits
-     * @return number of bits written
-     * @throws IOException if reading or writing fails
-     */
-    public int writeCompressedFile(InputStream in, OutputStream out) throws IOException {
-        BitOutputStream bitOut = new BitOutputStream(out);
-        BitInputStream bitIn = new BitInputStream(in);
-        int bitsWritten = 0;
-
-        try {
-            // lead with the header so a decoder knows how to rebuild the tree
-            bitsWritten += writeHeader(bitOut);
-            int byteRead;
-            // encode each original byte using the precomputed table
-            while ((byteRead = bitIn.readBits(IHuffConstants.BITS_PER_WORD)) != -1) {
-                bitsWritten += writeCode(bitOut, codes[byteRead]);
-            }
-            // append the pseudo EOF so the decoder knows when to stop
-            bitsWritten += writeCode(bitOut, codes[IHuffConstants.PSEUDO_EOF]);
-        } finally {
-            // close in reverse order so downstream streams flush cleanly
-            bitIn.close();
-            bitOut.close();
+    public Compressor(int[] freqs) {
+        if (freqs == null || freqs.length != ALPH_SIZE + 1) {
+            throw new IllegalArgumentException("Violation of precondition: Compressor(). Invalid " +
+                    "frequency array.");
         }
-        return bitsWritten;
+
+        this.freqs = new int[ALPH_SIZE + 1];
+        for (int i = 0; i < freqs.length; i++) {
+            this.freqs[i] = freqs[i];
+        }
+        // ensure PSEUDO_EOF always has frequency 1 to indicate end of array
+        this.freqs[PSEUDO_EOF] = 1;
     }
 
     /**
-     * Calculate bits needed for the header
-     * @return total header bits
+     * Build the Huffman tree.
+     * pre: none
+     * post: tree initialized
      */
-    private int computeHeaderBits() {
-        // magic + header-kind ints always lead, regardless of format choice
-        int bits = IHuffConstants.BITS_PER_INT * 2;
-        bits += headerPayloadBitCount();
+    public void buildTree() {
+        tree = new HuffmanTree(freqs);
+    }
+
+    /**
+     * Build the Huffman codes from the tree.
+     * pre: tree != null
+     * post: codes array initialized
+     */
+    public void buildCodes() {
+        if (tree == null) {
+            throw new IllegalStateException("Violation of precondition: buildCodes(). Tree must " +
+                    "be built before codes.");
+        }
+
+        codes = tree.makeCodes();
+    }
+
+    /**
+     * Accessor for codes array during preprocessing estimation.
+     * pre: codes != null
+     * post: returns internal code map
+     */
+    public String[] getCodesForEstimate() {
+        if (codes == null) {
+            throw new IllegalStateException("Violation of precondition: getCodesForEstimate(). " +
+                    "Codes not built yet.");
+        }
+
+        return codes;
+    }
+
+    /**
+     * Write the full compressed file: magic, header, encoded data.
+     * pre: rawIn != null && rawOut != null && codes != null
+     * post: compressed file written
+     */
+    public int writeCompressed(InputStream rawIn, OutputStream rawOut, int headerFormat)
+            throws IOException {
+        if (rawIn == null || rawOut == null) {
+            throw new IllegalArgumentException("Violation of precondition: writeCompressed" +
+                    "(). Input/output streams cannot be null.");
+        }
+        if (codes == null) {
+            throw new IllegalStateException("Violation of precondition: writeCompressed(). Codes " +
+                    "must be generated before compressing.");
+        }
+
+        BitOutputStream out = new BitOutputStream(rawOut);
+        int bits = 0;
+        bits += writeMagicAndFormat(out, headerFormat);
+        bits += writeHeader(out, headerFormat);
+        bits += writeData(rawIn, out);
+        bits += writeEOF(out);
+        out.close();
         return bits;
     }
 
     /**
-     * Calculate bits needed to store the tree
-     * @param node current subtree root
-     * @return bits for this subtree
+     * Writes the magic number and the header format.
+     * pre: out != null
+     * post: two 32-bit values written
      */
-    private int computeTreeBits(TreeNode node) {
+    private int writeMagicAndFormat(BitOutputStream out, int headerFormat) {
+        if (out == null) {
+            throw new IllegalArgumentException("Violation of precondition: writeMagicAndFormat" +
+                    "(). Output stream cannot be null.");
+        }
+
+        out.writeBits(BITS_PER_INT, MAGIC_NUMBER);
+        out.writeBits(BITS_PER_INT, headerFormat);
+        return BITS_PER_INT * 2;
+    }
+
+    /**
+     * Writes either SCF or STF header.
+     * pre: out != null
+     * post: header bits written
+     */
+    private int writeHeader(BitOutputStream out, int format) throws IOException {
+        if (out == null) {
+            throw new IllegalArgumentException("Violation of precondition: writeHeader(). Output " +
+                    "stream cannot be null.");
+        }
+
+        if (format == STORE_COUNTS) {
+            return writeSCF(out);
+        }
+        else {
+            return writeSTF(out);
+        }
+    }
+
+    /**
+     * Standard Count Format header: 256 32-bit frequencies.
+     * pre: out != null
+     * post: SCF written
+     */
+    private int writeSCF(BitOutputStream out) {
+        if (out == null) {
+            throw new IllegalArgumentException(
+                    "Violation of precondition: writeSCF(). Output stream cannot be null.");
+        }
+
+        int bits = 0;
+        for (int i = 0; i < ALPH_SIZE; i++) {
+            // store byte i's frequency so the decoder can rebuild the Huffman tree
+            out.writeBits(BITS_PER_INT, freqs[i]);
+            bits += BITS_PER_INT;
+        }
+        return bits;
+    }
+
+    /**
+     * Standard Tree Format header: 32-bit size + preorder bits.
+     * pre: out != null && tree != null
+     * post: STF written
+     */
+    private int writeSTF(BitOutputStream out) throws IOException {
+        int size = computeTreeSize(tree.getRoot());
+        // write the total number of bits in the preorder tree encoding
+        out.writeBits(BITS_PER_INT, size);
+        return BITS_PER_INT + writeTreeBits(out, tree.getRoot());
+    }
+
+    /**
+     * Compute preorder tree size in bits.
+     * pre: none
+     * post: returns size in bits
+     */
+    private int computeTreeSize(TreeNode node) {
         if (node == null) {
+            // null nodes are not written into the header
             return 0;
         }
         if (node.isLeaf()) {
+            // leaf node, contributes 1 bit for the leaf flag + 9 bits for the stored value
+            return 1 + (BITS_PER_WORD + 1);
+        }
+        // internal node contributes 1 bit plus its children’s sizes
+        return 1 + computeTreeSize(node.getLeft()) + computeTreeSize(node.getRight());
+    }
+
+    /**
+     * Write preorder structure: 0 for internal, 1 + 9 bits for leaf.
+     * pre: out != null
+     * post: preorder bits written
+     */
+    private int writeTreeBits(BitOutputStream out, TreeNode node) throws IOException {
+        // base case, leaf node, reached the end of the current path
+        if (node.isLeaf()) {
+            // write a 1 to mark it as a leaf
+            out.writeBits(1, 1);
+            // write the leaf's value using 9 bits (ASCII value and 1 extra bit)
+            out.writeBits(IHuffConstants.BITS_PER_WORD + 1, node.getValue());
             return 1 + (IHuffConstants.BITS_PER_WORD + 1);
         }
-        return 1 + computeTreeBits(node.getLeft()) + computeTreeBits(node.getRight());
-    }
-
-    /**
-     * Calculate bits needed for the compressed data body
-     * @return bits for the encoded payload
-     */
-    private int computeDataBits() {
-        int bits = 0;
-        // each symbol contributes freq * code length bits to the output
-        for (int value = 0; value < IHuffConstants.ALPH_SIZE; value++) {
-            if (freq[value] > 0 && codes[value] != null) {
-                bits += freq[value] * codes[value].length();
-            }
-        }
-        // pseudo EOF always shows up once regardless of the input
-        bits += codes[IHuffConstants.PSEUDO_EOF].length();
+        // else it is an internal node, mark it with a 0
+        out.writeBits(1, 0);
+        int bits = 1;
+        // recursive step, iterate back through the tree to continue accumulating bits
+        bits += writeTreeBits(out, node.getLeft());
+        bits += writeTreeBits(out, node.getRight());
         return bits;
     }
 
     /**
-     * Write the magic number and header info
-     * @param bitOut destination stream
-     * @return header bits written
-     * @throws IOException if write fails
+     * Write encoded data chunks.
+     * pre: rawIn != null && out != null && codes != null
+     * post: encodings written to out
      */
-    private int writeHeader(BitOutputStream bitOut) throws IOException {
+    private int writeData(InputStream rawIn, BitOutputStream out) throws IOException {
+        BitInputStream in = new BitInputStream(rawIn);
         int bits = 0;
-        bitOut.writeBits(IHuffConstants.BITS_PER_INT, IHuffConstants.MAGIC_NUMBER);
-        bitOut.writeBits(IHuffConstants.BITS_PER_INT, headerFormat);
-        bits += IHuffConstants.BITS_PER_INT * 2;
-
-        // payload differs between count and tree headers, so hand off to helper
-        bits += writeHeaderPayload(bitOut);
+        int value = in.readBits(BITS_PER_WORD);
+        while (value != -1) {
+            // retrieve the huffman bitstring for the byte value
+            String code = codes[value];
+            for (int i = 0; i < code.length(); i++) {
+                // convert the character into the corresponding numeric bit
+                out.writeBits(1, code.charAt(i) == '1' ? 1 : 0);
+                bits++;
+            }
+            value = in.readBits(BITS_PER_WORD);
+        }
         return bits;
     }
 
     /**
-     * Write a single Huffman code to output
-     * @param bitOut destination stream
-     * @param code string of '0'/'1'
-     * @return bits written
+     * Writes the pseudo-EOF code at end of data.
+     * pre: out != null
+     * post: EOF bits written
      */
-    private int writeCode(BitOutputStream bitOut, String code) {
-        if (code == null) {
-            throw new IllegalStateException("Missing Huffman code during compression");
+    private int writeEOF(BitOutputStream out) {
+        String eof = codes[PSEUDO_EOF];
+        for (int i = 0; i < eof.length(); i++) {
+            // convert the character into the corresponding numeric bit
+            out.writeBits(1, eof.charAt(i) == '1' ? 1 : 0);
         }
-        for (int i = 0; i < code.length(); i++) {
-            bitOut.writeBits(1, code.charAt(i) - '0');
-        }
-        return code.length();
-    }
-
-    /**
-     * Get size of the header payload (counts or tree)
-     * @return bits for the header payload
-     */
-    private int headerPayloadBitCount() {
-        if (headerFormat == IHuffConstants.STORE_TREE) {
-            // tree headers carry an int with the tree size followed by the preorder bits
-            return IHuffConstants.BITS_PER_INT + computeTreeBits(tree.getRoot());
-        }
-        if (headerFormat == IHuffConstants.STORE_COUNTS) {
-            // count headers list every byte frequency explicitly (no entry for pseudo EOF)
-            return IHuffConstants.ALPH_SIZE * IHuffConstants.BITS_PER_INT; // 32 bits per int
-        }
-        throw new IllegalStateException("Invalid header format: " + headerFormat);
-    }
-
-    /**
-     * Write the header payload (counts or tree)
-     * @param bitOut destination stream
-     * @return bits written
-     * @throws IOException if write fails
-     */
-    private int writeHeaderPayload(BitOutputStream bitOut) throws IOException {
-        if (headerFormat == IHuffConstants.STORE_TREE) {
-            int treeBits = computeTreeBits(tree.getRoot());
-            bitOut.writeBits(IHuffConstants.BITS_PER_INT, treeBits);
-            tree.writeTree(bitOut);
-            return IHuffConstants.BITS_PER_INT + treeBits;
-        }
-        if (headerFormat == IHuffConstants.STORE_COUNTS) {
-            for (int i = 0; i < IHuffConstants.ALPH_SIZE; i++) {
-                bitOut.writeBits(IHuffConstants.BITS_PER_INT, freq[i]);
-            }
-            return IHuffConstants.ALPH_SIZE * IHuffConstants.BITS_PER_INT;
-        }
-        throw new IOException("Invalid header format: " + headerFormat);
+        return eof.length();
     }
 }

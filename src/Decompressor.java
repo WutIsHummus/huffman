@@ -20,7 +20,7 @@ import java.io.OutputStream;
 import java.io.IOException;
 
 /**
- * A helper class used by SimpleHuffProcessor to perform file decompression. Handles reading
+ * A class used by SimpleHuffProcessor to perform file decompression. Handles reading
  * header information, reconstructing the Huffman tree, and decoding the compressed bitstream.
  * pre: none
  * post: provides methods for decoding Huffman-compressed data
