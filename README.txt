@@ -31,7 +31,7 @@ serrano.tif          11,987,312       9,021,160         24.7%
 tulips.tif           9,438,272        9,086,888         3.7%
 
 Observation: 
-Most TIFF images showed only modest compression (2-8%), with frymire.tif; however, 
+Most TIFF images showed only modest compression (2-8%); however, frymire.tif and
 serrano.tif had significant compression. This seems typical for 
 images which is either redundant or already efficiently compressed
 
